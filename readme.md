@@ -37,7 +37,7 @@ Failures are not just caught; they are categorized. Every rejected trade is logg
 
 ---
 
-## 🤖 AI Usage & Guidance
+## AI Usage & Guidance
 This project was developed using a **"Human-in-the-Loop"** AI strategy.
 
 * **Guidance Files:** I utilized `agents.md` and `constraints.md` to constrain the AI. For example, the AI was strictly forbidden from using floating-point numbers for currency, forcing the use of `Decimal` for precision.
