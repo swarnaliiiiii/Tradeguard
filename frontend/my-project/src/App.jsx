@@ -1,222 +1,129 @@
-import { useEffect, useEffectEvent, useState, useTransition } from 'react'
-import { AuditTable } from './components/AuditTable'
-import { MarketDepth } from './components/MarketDepth'
-import { OrderEntryCard } from './components/OrderEntryCard'
-import { RightPanel } from './components/RightPanel'
-import { Sidebar } from './components/Sidebar'
-import { StatusBanner } from './components/StatusBanner'
-import { fetchAudit, fetchBalance, fetchDepth, fetchHealth, submitOrder } from './lib/api'
-import { formatCurrency, formatNumber, normalizeDepth } from './lib/format'
+import { useState, useEffect, useCallback } from "react";
+import OrderForm from "./components/OrderForm";
+import OrderBook from "./components/OrderBook";
+import AuditLog from "./components/AuditLog";
+import StatusToast from "./components/StatusToast";
+import PortfolioCard from "./components/PortfolioCard";
 
-const DEFAULT_FORM = {
-  userId: 'user1',
-  ticker: 'GOOGL',
-  side: 'bid',
-  price: '100.00',
-  qty: '10',
-}
+const API = "http://127.0.0.1:5000";
+const USER_ID = "user1";
 
-function App() {
-  const [form, setForm] = useState(DEFAULT_FORM)
-  const [account, setAccount] = useState({ balanceUsd: 0, shares: 0 })
-  const [depth, setDepth] = useState({ bids: [], asks: [] })
-  const [auditEntries, setAuditEntries] = useState([])
-  const [systemStatus, setSystemStatus] = useState({
-    ok: false,
-    label: 'Connecting',
-    detail: 'Looking for the Flask risk service.',
-  })
-  const [banner, setBanner] = useState({
-    tone: 'info',
-    title: 'Desk ready',
-    message: 'Submit a ticket to validate it against the TradeGuard gate.',
-  })
-  const [lastUpdated, setLastUpdated] = useState(null)
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [isRefreshing, startRefreshTransition] = useTransition()
+export default function App() {
+  const [depth, setDepth] = useState({});
+  const [audit, setAudit] = useState([]);
+  const [balance, setBalance] = useState(null);
+  const [lastResult, setLastResult] = useState(null);
+  const [backendOnline, setBackendOnline] = useState(null);
 
-  const hydrateDashboard = useEffectEvent(async ({ silent = false } = {}) => {
+  const fetchAll = useCallback(async () => {
     try {
-      const [healthPayload, balancePayload, depthPayload, auditPayload] = await Promise.all([
-        fetchHealth(),
-        fetchBalance(DEFAULT_FORM.userId),
-        fetchDepth(),
-        fetchAudit(5),
-      ])
-
-      startRefreshTransition(() => {
-        setAccount({
-          balanceUsd: balancePayload.balance_usd ?? 0,
-          shares: balancePayload.shares ?? 0,
-        })
-        setDepth(normalizeDepth(depthPayload.depth))
-        setAuditEntries(auditPayload.entries ?? [])
-        setSystemStatus({
-          ok: healthPayload.status === 'ok',
-          label: healthPayload.status === 'ok' ? 'Live' : 'Degraded',
-          detail:
-            healthPayload.status === 'ok'
-              ? 'Risk checks, book updates, and audit logging are reachable.'
-              : 'One or more backend services may be unavailable.',
-        })
-        setLastUpdated(new Date().toISOString())
-      })
-    } catch (error) {
-      setSystemStatus({
-        ok: false,
-        label: 'Offline',
-        detail: error.message,
-      })
-
-      if (!silent) {
-        setBanner({
-          tone: 'warning',
-          title: 'Backend connection issue',
-          message: `${error.message}. Start the Flask API to stream live balance, depth, and audit data.`,
-        })
-      }
+      const [depthRes, auditRes, balRes] = await Promise.all([
+        fetch(`${API}/api/depth`),
+        fetch(`${API}/api/audit?limit=10`),
+        fetch(`${API}/api/balance/${USER_ID}`),
+      ]);
+      const [depthData, auditData, balData] = await Promise.all([
+        depthRes.json(),
+        auditRes.json(),
+        balRes.json(),
+      ]);
+      setDepth(depthData.depth ?? {});
+      setAudit(auditData.entries ?? []);
+      setBalance(balData);
+      setBackendOnline(true);
+    } catch {
+      setBackendOnline(false);
     }
-  })
+  }, []);
 
   useEffect(() => {
-    hydrateDashboard()
-
-    const intervalId = window.setInterval(() => {
-      hydrateDashboard({ silent: true })
-    }, 5000)
-
-    return () => window.clearInterval(intervalId)
-  }, [hydrateDashboard])
-
-  function handleFieldChange(event) {
-    const { name, value } = event.target
-    setForm((current) => ({ ...current, [name]: value }))
-  }
-
-  function handleSideChange(side) {
-    setForm((current) => ({ ...current, side }))
-  }
-
-  async function handleSubmit(event) {
-    event.preventDefault()
-    setIsSubmitting(true)
-
-    try {
-      const payload = {
-        user_id: form.userId,
-        ticker: form.ticker.trim().toUpperCase(),
-        side: form.side,
-        qty: Number.parseInt(form.qty, 10),
-        price: Number(form.price).toFixed(2),
-      }
-
-      const result = await submitOrder(payload)
-      const isApproved = result.status === 'APPROVED'
-
-      setBanner({
-        tone: isApproved ? 'success' : 'danger',
-        title: isApproved ? 'Order accepted' : 'Risk violation',
-        message: isApproved
-          ? `${payload.side.toUpperCase()} ${payload.qty} ${payload.ticker} at ${formatCurrency(Number(payload.price))}. Filled ${result.filled_qty}, resting ${result.remaining_qty}.`
-          : result.reason || 'The order was rejected by the gate.',
-      })
-
-      await hydrateDashboard()
-    } catch (error) {
-      setBanner({
-        tone: 'danger',
-        title: 'Submission failed',
-        message: error.message,
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }
-
-  const bestBid = depth.bids[0]?.price ?? 0
-  const bestAsk = depth.asks[0]?.price ?? 0
+    fetchAll();
+    const interval = setInterval(fetchAll, 5000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
 
   return (
-    <div className="relative min-h-screen overflow-hidden px-4 py-5 md:px-8 md:py-8">
-      <div className="pointer-events-none absolute left-[-10rem] top-[-8rem] h-72 w-72 rounded-full bg-cyan-300/30 blur-3xl glow-orb" />
-      <div className="pointer-events-none absolute bottom-[-8rem] right-[-8rem] h-80 w-80 rounded-full bg-emerald-300/30 blur-3xl glow-orb [animation-delay:-2s]" />
+    <div className="min-h-screen bg-[#080808] text-white font-sans">
+      {/* Subtle grid texture */}
+      <div
+        className="fixed inset-0 pointer-events-none opacity-[0.03]"
+        style={{
+          backgroundImage: `linear-gradient(#fff 1px, transparent 1px), linear-gradient(90deg, #fff 1px, transparent 1px)`,
+          backgroundSize: "48px 48px",
+        }}
+      />
 
-      <div className="mx-auto max-w-[1560px]">
-        <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">TradeGuard dashboard</p>
-            <h1 className="mt-2 font-heading text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">
-              Guard the trade before it reaches the market.
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-              Inspired by the reference layout, but rebuilt for your risk-first trading workflow with explicit gate, book,
-              and audit surfaces.
-            </p>
+      {/* Top nav */}
+      <header className="sticky top-0 z-40 border-b border-[#141414] bg-[#080808]/90 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 rounded-md bg-emerald-500 flex items-center justify-center">
+              <span className="text-black text-[10px] font-black">TG</span>
+            </div>
+            <span className="font-semibold text-sm tracking-tight">TradeGuard</span>
+            <span className="text-[#333] text-sm">/</span>
+            <span className="text-[#555] text-sm">dashboard</span>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="rounded-[24px] border border-white/60 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Cash</p>
-              <p className="mt-1 font-heading text-2xl font-semibold text-slate-950">{formatCurrency(account.balanceUsd)}</p>
-            </div>
-            <div className="rounded-[24px] border border-white/60 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Best bid</p>
-              <p className="mt-1 font-heading text-2xl font-semibold text-slate-950">{formatCurrency(bestBid)}</p>
-            </div>
-            <div className="rounded-[24px] border border-white/60 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Best ask</p>
-              <p className="mt-1 font-heading text-2xl font-semibold text-slate-950">{formatCurrency(bestAsk)}</p>
+          <div className="flex items-center gap-4">
+            {backendOnline !== null && (
+              <span
+                className={`flex items-center gap-1.5 text-[11px] font-medium ${
+                  backendOnline ? "text-emerald-400" : "text-red-400"
+                }`}
+              >
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    backendOnline ? "bg-emerald-400 animate-pulse" : "bg-red-400"
+                  }`}
+                />
+                {backendOnline ? "Backend online" : "Backend offline"}
+              </span>
+            )}
+            <div className="text-[#555] text-xs border border-[#1e1e1e] rounded-md px-2.5 py-1 font-mono">
+              {USER_ID}
             </div>
           </div>
         </div>
+      </header>
 
-        <div className="overflow-hidden rounded-[36px] border border-white/70 bg-white/65 shadow-[0_30px_80px_rgba(15,23,42,0.16)] backdrop-blur">
-          <div className="grid xl:grid-cols-[280px_minmax(0,1fr)_340px]">
-            <Sidebar />
-
-            <main className="space-y-6 px-5 py-6 xl:px-8 xl:py-8">
-              <div className="grid gap-4 lg:grid-cols-[1.1fr_auto] lg:items-center">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-700">Command center</p>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-                    Current user: <span className="font-semibold text-slate-950">{DEFAULT_FORM.userId}</span>. Shares held:{' '}
-                    <span className="font-semibold text-slate-950">{formatNumber(account.shares)}</span>. Refresh state:{' '}
-                    <span className="font-semibold text-slate-950">{isRefreshing ? 'Syncing' : 'Stable'}</span>.
-                  </p>
-                </div>
-
-                <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Backend health</p>
-                  <p className="mt-1 font-heading text-xl font-semibold text-slate-950">{systemStatus.label}</p>
-                  <p className="mt-1 text-sm text-slate-500">{systemStatus.detail}</p>
-                </div>
-              </div>
-
-              <StatusBanner banner={banner} />
-              <OrderEntryCard
-                form={form}
-                onFieldChange={handleFieldChange}
-                onSideChange={handleSideChange}
-                onSubmit={handleSubmit}
-                isSubmitting={isSubmitting}
-                account={account}
-              />
-              <MarketDepth bids={depth.bids} asks={depth.asks} />
-              <AuditTable entries={auditEntries} />
-            </main>
-
-            <RightPanel
-              account={account}
-              systemStatus={systemStatus}
-              banner={banner}
-              entries={auditEntries}
-              lastUpdated={lastUpdated}
-            />
-          </div>
+      {/* Hero strip */}
+      <div className="border-b border-[#141414] bg-[#0a0a0a]">
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <p className="text-[11px] uppercase tracking-[0.2em] text-[#555] mb-2">TradeGuard Dashboard</p>
+          <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-white leading-none">
+            Guard the trade<br className="md:hidden" />{" "}
+            <span className="text-[#333]">before it reaches the market.</span>
+          </h1>
         </div>
       </div>
-    </div>
-  )
-}
 
-export default App
+      {/* Main layout */}
+      <main className="max-w-7xl mx-auto px-4 md:px-6 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+          {/* Left column */}
+          <div className="flex flex-col gap-6">
+            <OrderForm onOrderResult={setLastResult} onRefresh={fetchAll} />
+            <OrderBook depth={depth} />
+            <AuditLog entries={audit} />
+          </div>
+
+          {/* Right column */}
+          <div className="flex flex-col gap-6">
+            <PortfolioCard balance={balance} />
+          </div>
+        </div>
+      </main>
+
+      <StatusToast result={lastResult} onDismiss={() => setLastResult(null)} />
+
+      <style>{`
+        @keyframes slideIn {
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        .animate-slideIn { animation: slideIn 0.2s ease-out; }
+      `}</style>
+    </div>
+  );
+}
