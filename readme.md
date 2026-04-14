@@ -2,7 +2,7 @@
 
 **TradeGuard** is a high-integrity middleware service designed to sit between a trading terminal and an exchange. It ensures that every order is validated against strict financial risk rules before being committed to a live Limit Order Book.
 
-## 🚀 Technical Stack
+## Technical Stack
 * **Backend:** Python 3.11, Flask (API Framework)
 * **Frontend:** React (Vite), Tailwind CSS
 * **Database:** SQLite + SQLAlchemy (Relational Audit Log)
@@ -11,7 +11,7 @@
 
 ---
 
-## 🏗️ Architecture & Structure
+## Architecture & Structure
 The project follows a **Modular Monolith** structure with clear separation of concerns to ensure **Change Resilience**.
 
 * `/api`: Flask routes and request handling.
@@ -23,7 +23,7 @@ The project follows a **Modular Monolith** structure with clear separation of co
 
 ---
 
-## 🛠️ Key Technical Decisions
+## Key Technical Decisions
 
 ### 1. Interface Safety over "Clever" Code
 To prevent invalid states, I implemented a **Zero-Trust Boundary**. Every request entering the system is validated by Pydantic. If a price is negative or a ticker is missing, the system rejects it at the gate before it ever touches the database or order book.
@@ -45,13 +45,13 @@ This project was developed using a **"Human-in-the-Loop"** AI strategy.
 
 ---
 
-## ⚠️ Risks & Extensions
+##  Risks & Extensions
 * **Concurrency:** In the current MVP, the in-memory order book is not thread-safe. For a production environment, I would implement **Redis-based locking** or a **Message Queue (RabbitMQ)** to handle high-frequency concurrent orders.
 * **Scalability:** To scale, the Risk Engine could be moved to a Lambda/Serverless function to handle bursts of validation requests independently of the Order Book state.
 
 ---
 
-## 🚦 Getting Started
+##  Getting Started
 
 ### Prerequisites
 * Python 3.10+
@@ -73,7 +73,7 @@ This project was developed using a **"Human-in-the-Loop"** AI strategy.
 
 ---
 
-## ✅ Verification
+## Verification
 Run the automated test suite to verify the Risk Engine rules:
 ```bash
 pytest backend/tests/test.py
